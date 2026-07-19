@@ -1,35 +1,23 @@
 set nocompatible
 filetype off
 
-set rtp+=~/.vim/bundle/vundle/
-call vundle#rc()
+set rtp+=~/.vim/bundle/Vundle.vim
 
-Plugin 'gmarik/vundle'
-
-Plugin 'scrooloose/nerdtree'
-
-Plugin 'scrooloose/nerdcommenter'
-
+call vundle#begin()
+Plugin 'VundleVim/Vundle.vim'
+Plugin 'preservim/nerdtree'
+Plugin 'preservim/nerdcommenter'
 Plugin 'sjl/badwolf'
-
-Plugin 'majutsushi/tagbar'
-
 Plugin 'vim-airline/vim-airline'
-
 Plugin 'vim-airline/vim-airline-themes'
-
 Plugin 'tpope/vim-fugitive'
-
-Plugin 'xolox/vim-easytags'
-
-Plugin 'xolox/vim-misc'
-
 Plugin 'godlygeek/tabular'
-
-Plugin 'plasticboy/vim-markdown'
-
 Plugin 'mhinz/vim-startify'
-
+Plugin 'elzr/vim-json'
+Plugin 'christoomey/vim-tmux-navigator'
+Plugin 'preservim/vim-markdown'
+Plugin 'catppuccin/vim'
+call vundle#end()
 filetype plugin indent on
 
 " When started as "evim", evim.vim will already have done these settings.
@@ -48,20 +36,27 @@ if has("vms")
   set nobackup		" do not keep a backup file, use versions instead
 else
   set backup		" keep a backup file (restore to previous version)
-  set undofile		" keep an undo file (undo changes after closing)
+  set undofile      " keep an undo file (undo changes after closing)
+  set backupdir=/tmp//
+  set directory=/tmp//
+  set undodir=/tmp//
 endif
-set history=50		" keep 50 lines of command line history
+
+syntax enable
+
+set history=100		" keep 50 lines of command line history
 set ruler		" show the cursor position all the time
 set showcmd		" display incomplete commands
 set incsearch		" do incremental searching
+set number
+set tabstop=4 softtabstop=0 expandtab shiftwidth=4 smarttab
+set encoding=utf-8
+set formatoptions-=cro
+set shell=/bin/zsh
 
 " For Win32 GUI: remove 't' flag from 'guioptions': no tearoff menu entries
 " let &guioptions = substitute(&guioptions, "t", "", "g")
 
-
-" CTRL-U in insert mode deletes a lot.  Use CTRL-G u to first break undo,
-" so that you can undo CTRL-U after inserting a line break.
-inoremap <C-U> <C-G>u<C-U>
 
 " In many terminal emulators the mouse works just fine, thus enable it.
 if has('mouse')
@@ -107,13 +102,28 @@ else
 
 endif " has("autocmd")
 
-" Convenient command to see the difference between the current buffer and the
-" file it was loaded from, thus the changes you made.
-" Only define it when not defined already.
-if !exists(":DiffOrig")
-  command DiffOrig vert new | set bt=nofile | r ++edit # | 0d_ | diffthis
-		  \ | wincmd p | diffthis
-endif
+" Don't conceal quotes/syntax in JSON — show it literally (elzr/vim-json)
+let g:vim_json_syntax_conceal = 0
+
+augroup json_autocmd
+autocmd!
+autocmd FileType json setlocal autoindent
+autocmd FileType json setlocal formatoptions=tcq2l
+autocmd FileType json setlocal textwidth=78 shiftwidth=2
+autocmd FileType json setlocal softtabstop=2 tabstop=8
+autocmd FileType json setlocal expandtab
+autocmd FileType json setlocal foldmethod=syntax
+autocmd FileType json setlocal foldlevel=99
+augroup END
+
+augroup markdown_autocmd
+autocmd!
+"vim-markdown folds headings by default; keep the folds but open them all
+autocmd FileType markdown setlocal foldlevel=99
+augroup END
+
+"close vim if the only window left open is a NERDTree
+autocmd bufenter * if (winnr("$") == 1 && exists("b:NERDTree") && b:NERDTree.isTabTree()) | q | endif
 
 if has('langmap') && exists('+langnoremap')
   " Prevent that the langmap option applies to characters that result from a
@@ -122,54 +132,30 @@ if has('langmap') && exists('+langnoremap')
   set langnoremap
 endif
 
-set number
-set tabstop=4 softtabstop=0 expandtab shiftwidth=4 smarttab
-inoremap jk <ESC>
-let mapleader = "\<Space>"
-set encoding=utf-8
-vnoremap . :norm.<CR>
-set formatoptions-=cro
-syntax enable
 
-nnoremap <leader>ev :vsplit $MYVIMRC<cr>
-nnoremap <leader>sv :source $MYVIMRC<cr>
+" Truecolor for modern colorschemes; the t_8f/t_8b escapes make it work inside tmux.
+if has('termguicolors')
+  let &t_8f = "\<Esc>[38:2:%lu:%lu:%lum"
+  let &t_8b = "\<Esc>[48:2:%lu:%lu:%lum"
+  set termguicolors
+endif
+let g:airline_theme = 'catppuccin_mocha'
+let g:airline_powerline_fonts = 1                 " needs the nerd font (iTerm profile step)
+let g:airline#extensions#branch#enabled = 1       " git branch via fugitive
+let g:airline#extensions#tabline#enabled = 1      " themed buffer/tab line (replaces MyTabLine)
+let g:airline#extensions#tabline#formatter = 'unique_tail'
+let g:airline_section_z = '%l:%c · %p%%'          " line:col · percent — drops the noisy default
+let g:airline#extensions#whitespace#enabled = 0   " kills the orange [169]trailing block
+colorscheme catppuccin_mocha
+" (badwolf kept installed as a fallback: `colorscheme badwolf`)
 
-iabbrev @@ ganatraparth1995@gmail.com
-iabbrev @@@ 201301439@daiict.ac.in
-iabbrev ssig -- <cr>Parth Ganatra<cr>201301439
+" distinguish vim panes from shell/Claude panes: vim canvas = mantle
+highlight Normal guibg=#181825
+highlight LineNr guibg=#181825
+set cursorline
 
-nnoremap <leader>s :set spell!<CR>
-nnoremap <leader>c 1z=
-nnoremap <leader>" viw<esc>a"<esc>hbi"<esc>lel
-nnoremap <leader>' viw<esc>a'<esc>hbi'<esc>lel
-nnoremap <leader>< viw<esc>a<<esc>hbi<<esc>lel
-nnoremap <leader>( viw<esc>a(<esc>hbi(<esc>lel
-nnoremap <leader>{ viw<esc>a{<esc>hbi{<esc>lel
-nnoremap <leader>[ viw<esc>a[<esc>hbi[<esc>lel
-nnoremap <leader>t :TagbarToggle<CR>
-nnoremap <leader>n :NERDTreeToggle<CR>
-nnoremap <Leader>f :%s/\<<C-r><C-w>\>//g<Left><Left>
-
-nnoremap H ^
-nnoremap L $
-
-"inoremap <esc> <nop>
-"nnoremap <left> <nop>
-"nnoremap <right> <nop>
-"noremap <up> <nop>
-"noremap <down> <nop>
-"inoremap <left> <nop>
-"inoremap <right> <nop>
-"inoremap <up> <nop>
-"inoremap <down> <nop>
-colorscheme badwolf
-
-autocmd filetype python nnoremap <F5> :w <bar> exec '!python '.shellescape('%')<CR>
-autocmd filetype c nnoremap <F5> :w <bar> exec '!gcc '.shellescape('%').' -o '.shellescape('%:r').' && ./'.shellescape('%:r')<CR>
-autocmd filetype cpp nnoremap <F5> :w <bar> exec '!g++ '.shellescape('%').' -o '.shellescape('%:r').' && ./'.shellescape('%:r')<CR>
-
-"add endl shortcut
-
+"Functions
+"Call ranger to open file
 function! RangeChooser()
     let temp = tempname()
     " The option "--choosefiles" was added in ranger 1.5.1. Use the next line
@@ -199,5 +185,135 @@ function! RangeChooser()
     endfor
     redraw!
 endfunction
+
+function! CopyMatches(reg)
+    let hits = []
+    %s//\=len(add(hits, submatch(0))) ? submatch(0) : ''/ge
+    let reg = empty(a:reg) ? '+' : a:reg
+    execute 'let @'.reg.' = join(hits, "\n") . "\n"'
+endfunction
+
+function! ReplaceEpoch()
+    %s/\(\d\{13\}\)/\=strftime('%+', str2nr(submatch(1)))/g
+endfunction
+
+function! OpenUrl()
+    echo "Hello"
+    let matches = matchlist(getline("."), '\(jira\|zendesk\|pr\):\(.\+\)')
+    echo matches
+    let type = matches[1]
+    let uri = matches[2]
+    if type != "" && uri != ""
+        if type == "jira"
+            exec "!open \"" . "https://sprinklr.atlassian.net/browse/" . uri . "\""
+        elseif type == "pr"
+            exec "!open \"" . "https://prod-gitlab.sprinklr.com/sprinklr/main/sprinklr.app/merge_requests/" . uri . "\""
+        else 
+            echo "unsupported type"
+        endif
+    else
+        echo "No type"
+    endif
+endfunction
+
+""""""" End Functions 
+
+iabbrev @@ ganatraparth1995@gmail.com
+iabbrev @@@ 201301439@daiict.ac.in
+iabbrev ssig -- <cr>Parth Ganatra<cr>201301439
+
+
+""""""""""""""" Run time things 
+
+""""""" Commands 
+
 command! -bar RangerChooser call RangeChooser()
+command! -register CopyMatches call CopyMatches(<q-reg>)
+command! -register ReplaceEpoch call ReplaceEpoch()
+command! -nargs=* -complete=shellcmd R new | setlocal buftype=nofile bufhidden=hide noswapfile | r !<args>
+
+
+" file it was loaded from, thus the changes you made.
+" Only define it when not defined already.
+if !exists(":DiffOrig")
+  command DiffOrig vert new | set bt=nofile | r ++edit # | 0d_ | diffthis
+		  \ | wincmd p | diffthis
+endif
+
+""""""" End Commands 
+
+
+
+
+""""""" Mappings 
+let mapleader = "\<Space>"
+inoremap jk <ESC>
+
+" CTRL-U in insert mode deletes a lot.  Use CTRL-G u to first break undo,
+" so that you can undo CTRL-U after inserting a line break.
+inoremap <C-U> <C-G>u<C-U>
+
+"edit and apply vim rc
+vnoremap . :norm.<CR>
+nnoremap <leader>ev :tabe $MYVIMRC<cr>
+nnoremap <leader>sv :source $MYVIMRC<cr>
+
+nnoremap H ^
+nnoremap L $
+
+"toggle spell check
+nnoremap <leader>s :set spell!<CR>
+"select first spell check suggestion
+nnoremap <leader>c 1z=
+
+" Surround by respective char
+nnoremap <leader>" viw<esc>a"<esc>hbi"<esc>lel
+nnoremap <leader>' viw<esc>a'<esc>hbi'<esc>lel
+nnoremap <leader>< viw<esc>a<<esc>hbi<<esc>lel
+nnoremap <leader>( viw<esc>a(<esc>hbi(<esc>lel
+nnoremap <leader>{ viw<esc>a{<esc>hbi{<esc>lel
+nnoremap <leader>[ viw<esc>a[<esc>hbi[<esc>lel
+
+" Split/pane navigation is handled by vim-tmux-navigator:
+" Ctrl-h/j/k/l moves across vim splits AND crosses into tmux panes seamlessly.
+" (Old manual <C-W> mappings removed 2026-07-11 — they overrode the plugin.)
+
+" Count Matches of words
+map ,* *<C-O>:%s///gn<CR>``
+
+nnoremap <leader>n :NERDTreeToggle<CR>
+
+" rename word under cursor
+nnoremap <Leader>f :%s/\<<C-r><C-w>\>//g<Left><Left>
+
+"execute file by pressing F5
+autocmd filetype python nnoremap <F5> :w <bar> exec '!python '.shellescape('%')<CR>
+autocmd filetype c nnoremap <F5> :w <bar> exec '!gcc '.shellescape('%').' -o '.shellescape('%:r').' && ./'.shellescape('%:r')<CR>
+autocmd filetype cpp nnoremap <F5> :w <bar> exec '!g++ '.shellescape('%').' -o '.shellescape('%:r').' && ./'.shellescape('%:r')<CR>
+
 nnoremap <leader>r :<C-U>RangerChooser<CR>
+xnoremap <leader>j :'<,'>!python3 -m json.tool<CR>
+nnoremap <leader>j :%!python3 -m json.tool<CR>
+nnoremap <leader>ou :call OpenUrl()<CR><CR>
+nnoremap <leader>y :%y+<CR>
+xnoremap <leader>y :'<,'>y+<CR>
+vnoremap <leader>en :!python3 -c 'import sys,urllib.parse;print(urllib.parse.quote(sys.stdin.read().strip()))'<cr>
+vnoremap <leader>de :!python3 -c 'import sys,urllib.parse;print(urllib.parse.unquote(sys.stdin.read().strip()))'<cr>
+
+"Useful mapping from plugins
+
+   " from nerdcommenter
+      "<leader>ci to toggle comment line
+      "<leader>cc  to comment line 
+      "<leader>cu to uncomment line
+      "<leader>cA to start append comment at end of line
+
+""""""" End Mappings 
+
+
+
+""""""" todo 
+"keywordprg based on file type for help command
+
+"""""""
+

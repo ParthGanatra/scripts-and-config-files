@@ -3,3 +3,8 @@ cache-downloads
 inspector
 api
 source/inspector.html
+
+# machine-local shell config — holds API keys/tokens, never commit
+.zshrc.local
+home/zshrc.local
+*.local
