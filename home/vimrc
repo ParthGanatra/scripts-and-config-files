@@ -296,7 +296,7 @@ xnoremap <leader>j :'<,'>!python3 -m json.tool<CR>
 nnoremap <leader>j :%!python3 -m json.tool<CR>
 nnoremap <leader>ou :call OpenUrl()<CR><CR>
 nnoremap <leader>y :%y+<CR>
-xnoremap <leader>y :'<,'>y+<CR>
+xnoremap <leader>y :y+<CR>
 vnoremap <leader>en :!python3 -c 'import sys,urllib.parse;print(urllib.parse.quote(sys.stdin.read().strip()))'<cr>
 vnoremap <leader>de :!python3 -c 'import sys,urllib.parse;print(urllib.parse.unquote(sys.stdin.read().strip()))'<cr>
 
@@ -316,4 +316,3 @@ vnoremap <leader>de :!python3 -c 'import sys,urllib.parse;print(urllib.parse.unq
 "keywordprg based on file type for help command
 
 """""""
-

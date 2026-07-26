@@ -1,0 +1,29 @@
+#!/usr/bin/env bash
+# tmux-sessionizer — fuzzy-jump to a project dir, creating a tmux session on demand.
+# Bound to Alt-f. Existing session → switch. New → shell (+ resume Claude if this
+# dir already has a conversation on disk).
+
+# Project roots: repos live flat under ~/work; plus a few fixed Obsidian folders.
+candidates=$(
+  find ~/work -mindepth 1 -maxdepth 1 -type d 2>/dev/null
+  printf '%s\n' \
+    "$HOME/obsidian/Work/Habits" \
+    "$HOME/obsidian/Work/Learn AI" \
+    "$HOME/obsidian/Work/Personal/Setups"
+)
+
+selected=${1:-$(printf '%s\n' "$candidates" | fzf --reverse --prompt 'project> ')}
+[[ -z $selected ]] && exit 0
+
+name=$(basename "$selected" | tr '.: ' '___')   # tmux forbids '.'/':'; spaces → '_'
+
+if ! tmux has-session -t="$name" 2>/dev/null; then
+  tmux new-session -ds "$name" -c "$selected"                     # window 0: shell
+  key=$(printf '%s' "$selected" | sed 's/[^A-Za-z0-9]/-/g')
+  if [[ -d "$HOME/.claude/projects/$key" ]]; then                 # prior convo exists?
+    tmux new-window -t "$name" -c "$selected" 'claude --continue'  # window 1: resume it
+    tmux select-window -t "$name":0
+  fi
+fi
+
+if [[ -z $TMUX ]]; then tmux attach -t "$name"; else tmux switch-client -t "$name"; fi
