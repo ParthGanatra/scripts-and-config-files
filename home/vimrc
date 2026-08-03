@@ -139,6 +139,15 @@ if has('termguicolors')
   let &t_8b = "\<Esc>[48:2:%lu:%lu:%lum"
   set termguicolors
 endif
+" Publish the open file as the terminal title, so tmux's automatic-rename-format
+" can name the window after it (same channel Claude uses for its session title).
+" t_ts/t_fs are set explicitly: the tmux-256color termcap doesn't define them, so
+" `set title` alone is a no-op inside tmux.
+set title
+set titlestring=%t%(\ %M%)
+let &t_ts = "\<Esc>]2;"
+let &t_fs = "\<Esc>\\"
+
 let g:airline_theme = 'catppuccin_mocha'
 let g:airline_powerline_fonts = 1                 " needs the nerd font (iTerm profile step)
 let g:airline#extensions#branch#enabled = 1       " git branch via fugitive
