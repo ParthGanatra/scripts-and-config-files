@@ -7,9 +7,9 @@
 candidates=$(
   find ~/work -mindepth 1 -maxdepth 1 -type d 2>/dev/null
   printf '%s\n' \
-    "$HOME/obsidian/Work/Habits" \
-    "$HOME/obsidian/Work/Learn AI" \
-    "$HOME/obsidian/Work/Personal/Setups"
+    "$HOME/obsidian/ParthVault/Habits" \
+    "$HOME/obsidian/ParthVault/Learn AI" \
+    "$HOME/obsidian/ParthVault/Personal/Setups"
 )
 
 selected=${1:-$(printf '%s\n' "$candidates" | fzf --reverse --prompt 'project> ')}

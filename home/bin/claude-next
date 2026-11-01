@@ -1,0 +1,43 @@
+#!/usr/bin/env bash
+# Jump to the Claude agent that has been waiting on Parth the longest.
+# Bound to prefix-l (replaces `workmux last-done`).
+#
+# Order: waiting (blocked on a permission/elicitation prompt) before done (finished,
+# unread), oldest first within each — the agent ignored longest is the one to visit.
+# The current pane is skipped so repeated taps cycle instead of sticking.
+set -uo pipefail
+
+dir="${XDG_STATE_HOME:-$HOME/.local/state}/claude-agents"
+TAB=$'\t'
+here="${TMUX_PANE:-}"
+
+panes="$(tmux list-panes -a -F "#{pane_id}" 2>/dev/null)"
+[ -n "$panes" ] || exit 0
+
+# NB: no `case` and no process substitution below — bash 3.2 (macOS /bin/bash)
+# mis-parses a case statement nested inside <(...).
+ranked="$(
+  for f in "$dir"/*; do
+    [ -f "$f" ] || continue
+    pane="%${f##*/}"
+    [ "$pane" = "$here" ] && continue
+    printf '%s\n' "$panes" | grep -qxF "$pane" || continue
+    read -r st ts < "$f" || continue
+    rank=""
+    [ "$st" = "waiting" ] && rank=0
+    [ "$st" = "done" ] && rank=1
+    [ -n "$rank" ] || continue
+    printf '%s%s%s%s%s\n' "$rank" "$TAB" "$ts" "$TAB" "$pane"
+  done | sort -t"$TAB" -k1,1n -k2,2n
+)"
+
+target="$(printf '%s\n' "$ranked" | head -n1 | cut -d"$TAB" -f3)"
+
+if [ -z "$target" ]; then
+  tmux display-message "no agent waiting"
+  exit 0
+fi
+
+tmux switch-client -t "$(tmux display-message -p -t "$target" '#{session_name}')" 2>/dev/null
+tmux select-window -t "$target" 2>/dev/null
+tmux select-pane -t "$target" 2>/dev/null

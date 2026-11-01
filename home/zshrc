@@ -55,3 +55,11 @@ function rcd {
     fi
 }
 # --- end ranger cd ---
+
+# glow wraps at a hard 80 columns no matter how wide the pane is (it only goes
+# narrower, never wider), so half a wide split sits empty. Upstream knows —
+# charmbracelet/glow#942, fix in flight as #952 — until then pass the width in.
+# $COLUMNS over `tput cols`: zsh builtin, no subprocess, and it stays set when
+# output is piped, where `tput cols` fails and would hand glow -w 0 (which turns
+# wrapping OFF entirely and splits words mid-word). Drop this once #952 ships.
+function glow() { command glow -w "${COLUMNS:-80}" "$@"; }

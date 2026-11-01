@@ -1,0 +1,31 @@
+#!/usr/bin/env bash
+# Record one Claude agent's state for the cross-session tmux bar (agents-bar.sh).
+# Wired into ~/.claude/settings.json hooks:  claude-state working|waiting|done
+#
+# Keyed by tmux pane id, so one file == one agent; agents-bar.sh reaps files whose
+# pane has died. Silent no-op outside tmux (bare terminal, SSH without tmux, CI).
+set -uo pipefail
+
+state="${1:-}"
+case "$state" in working|waiting|done) ;; *) exit 0 ;; esac
+[ -n "${TMUX_PANE:-}" ] || exit 0
+
+dir="${XDG_STATE_HOME:-$HOME/.local/state}/claude-agents"
+mkdir -p "$dir" 2>/dev/null || exit 0
+file="$dir/${TMUX_PANE#%}"
+
+# Repeated same-state writes must NOT reset the clock: PostToolUse fires on every
+# single tool call, and the bar's whole point is "how long has it been like this".
+prev=""
+[ -f "$file" ] && read -r prev _ < "$file"
+[ "$prev" = "$state" ] && exit 0
+
+printf '%s %s\n' "$state" "$(date +%s)" > "$file"
+
+# Push it to the bar immediately — status-interval is 15s, far too slow to notice
+# an agent that just went idle waiting on you.
+tmux list-clients -F '#{client_name}' 2>/dev/null | while read -r c; do
+  tmux refresh-client -S -t "$c" 2>/dev/null
+done
+
+exit 0

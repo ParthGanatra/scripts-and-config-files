@@ -1,0 +1,327 @@
+#!/usr/bin/env python3
+"""tmux-session-picker - the Alt-o popup: every tmux window, annotated with what its
+Claude agent is doing. Bound in ~/.config/tmux/tmux.conf.
+
+    ▼ myapp_server (3)  work/myapp.server:feature/abc-1234567/master/remove-dead-manual...
+      1 ● idle     myapp_server  projects-prepare           23m  yes try to find it
+      2 ● done     myapp_server  MR 1234 conflict resolut…   5m  Compacted (ctrl+o to see...
+    ▼ adhoc (1)  work/witness-alerts
+      3 ○ -        adhoc         zsh
+
+The repo path and branch live on the GROUP HEADER, not on every row: within one session
+they are almost always identical, and repeating them three times crowded out the window
+name, which is the column that actually tells the three apart. A window whose path or
+branch differs from its session header (a worktree) gets it appended to its own row.
+
+Headers are selectable and jump to the session's first window, so Enter on a header is
+never a dead keypress. Only the blank spacer rows are inert, and none is emitted before
+the first group -- otherwise fzf opens with its cursor parked on an empty line.
+
+Alt-o is NAVIGATE (everything that exists, including plain-shell windows); Alt-i is
+TRIAGE (ccmux picker: only agents, ordered by who needs you). Deliberately borrows
+ccmux's column language -- index, status dot, parent/repo:branch, trailing context --
+so hopping between the two pickers does not mean re-reading a different layout.
+
+One row per WINDOW, not per session. Window names carry real signal (the
+automatic-rename-format in tmux.conf makes Claude rename its window to the task) and a
+session like myapp_server holds three unrelated pieces of work.
+
+Headers vanish while you filter, so every row carries its own tmux session name in a
+column. That column looks redundant against the header when the list is at rest, and it
+is -- but in fzf, searchable means VISIBLE: `--nth` is applied to the string AFTER
+`--with-nth` has already transformed it, so a "hidden keywords" field is not achievable.
+Displaying fields 3.. and searching 2.. silently matches nothing, because after the
+transform there is no field 2 left. Filtering by session name is worth one dim column.
+
+State comes from `ccmux show --json`, which reports per AGENT keyed by tmux pane, so
+panes fold up to their WINDOW here -- an exact mapping, since one window is one agent.
+Windows with no agent still list, with a dash, which is the whole reason this is not
+just `ccmux picker`.
+
+Degrades to a plain window list if the ccmux daemon is down: the picker must never be
+the thing that breaks navigation.
+
+Fields are tab-separated: [0] tmux target, [1..] display. fzf gets `--with-nth 2..` and
+no `--nth`, so everything shown is searched and nothing searched is hidden.
+
+Python, not bash, deliberately. This started as bash with the list-building in a
+`python3 - <<PY` heredoc inside a `$(...)`, which bash 3.2 (macOS /bin/bash, what
+`env bash` resolves to) cannot parse when the heredoc body contains an odd number of
+apostrophes -- it counts quotes inside the substitution and dies with "unexpected EOF
+while looking for matching". Same 3.2 trap that `claude-next` documents for `case`
+inside process substitution. One language, no nested quoting, no trap.
+"""
+
+import json
+import os
+import shutil
+import subprocess
+import sys
+import time
+
+
+def tmux(*args):
+    try:
+        r = subprocess.run(("tmux",) + args, capture_output=True, text=True, timeout=5)
+        return r.stdout.splitlines() if r.returncode == 0 else []
+    except Exception:
+        return []
+
+
+def current_session():
+    out = tmux("display-message", "-p", "#S")
+    return out[0] if out else ""
+
+
+def fg(hexcode):
+    r, g, b = (int(hexcode[i:i + 2], 16) for i in (1, 3, 5))
+    return "\033[38;2;%d;%d;%dm" % (r, g, b)
+
+
+# Catppuccin Mocha, same palette as tmux.conf and agents-bar.sh.
+RESET = "\033[0m"
+TEXT = fg("#cdd6f4")
+OVERLAY = fg("#6c7086")
+SURFACE = fg("#585b70")
+BLUE = fg("#89b4fa")
+MAUVE = fg("#cba6f7")
+PEACH = fg("#fab387")
+GREEN = fg("#a6e3a1")
+
+# Urgency: blocked on Parth first, then finished-unread, then busy, then idle.
+RANK = {"waiting": 0, "done": 1, "working": 2, "idle": 3}
+STYLE = {
+    "waiting": (PEACH, "waiting"),
+    "done": (GREEN, "done"),
+    "working": (BLUE, "working"),
+    "idle": (SURFACE, "idle"),
+}
+
+IDXW, STATEW, SESSW, WINW = 3, 9, 16, 28
+
+
+def age(iso, now):
+    try:
+        stamp = time.mktime(time.strptime(iso.split(".")[0], "%Y-%m-%dT%H:%M:%S"))
+        secs = now - stamp + time.timezone
+    except Exception:
+        return ""
+    if secs < 0:
+        secs = 0
+    if secs < 60:
+        return "%ds" % int(secs)
+    if secs < 3600:
+        return "%dm" % int(secs // 60)
+    if secs < 86400:
+        return "%dh" % int(secs // 3600)
+    return "%dd" % int(secs // 86400)
+
+
+def clip(s, n):
+    """Truncate keeping the START (paths, prompts: the beginning orients you)."""
+    if n <= 1:
+        return ""
+    return s if len(s) <= n else s[:n - 1] + "…"
+
+
+def clip_tail(s, n):
+    """Truncate keeping the END (long branch names: the tail distinguishes them)."""
+    if n <= 1:
+        return ""
+    return s if len(s) <= n else "…" + s[-(n - 1):]
+
+
+def short_path(path):
+    """/Users/x/work/myapp.server -> ('work', 'myapp.server'), like ccmux renders it."""
+    if not path:
+        return ("", "")
+    path = path.rstrip("/")
+    home = os.path.expanduser("~")
+    if path.startswith(home):
+        path = path[len(home):].lstrip("/")
+    parts = [p for p in path.split("/") if p]
+    if not parts:
+        return ("", "~")
+    if len(parts) == 1:
+        return ("", parts[0])
+    return (parts[-2], parts[-1])
+
+
+def sessions_by_recency(current):
+    rows = []
+    for line in tmux("list-sessions", "-F", "#{session_last_attached}\t#{session_name}"):
+        ts, _, name = line.partition("\t")
+        if not name or name == current:
+            continue
+        try:
+            rows.append((int(ts or 0), name))
+        except ValueError:
+            rows.append((0, name))
+    rows.sort(key=lambda r: -r[0])
+    return [name for _, name in rows]
+
+
+def windows():
+    """(session, index) -> (window name, cwd), plus pane -> (session, index)."""
+    per_window, pane_map = {}, {}
+    fmt = ("#{pane_id}\t#{session_name}\t#{window_index}\t#{window_name}"
+           "\t#{pane_current_path}\t#{pane_active}")
+    for line in tmux("list-panes", "-a", "-F", fmt):
+        parts = line.split("\t")
+        if len(parts) != 6 or not parts[0]:
+            continue
+        pane, sess, idx, wname, cwd, active = parts
+        pane_map[pane] = (sess, idx)
+        # The active pane's cwd is the one worth showing for the window.
+        if (sess, idx) not in per_window or active == "1":
+            per_window[(sess, idx)] = (wname, cwd)
+    return per_window, pane_map
+
+
+def ccmux_agents():
+    """Optional: a dead daemon costs the state column, not the picker."""
+    try:
+        r = subprocess.run(["ccmux", "show", "--json"],
+                           capture_output=True, text=True, timeout=5)
+        if r.returncode == 0 and r.stdout.strip():
+            return json.loads(r.stdout)
+    except Exception:
+        pass
+    return []
+
+
+def build_rows(names, per_window, pane_map, agents, now, width):
+    best = {}
+    for a in agents:
+        key = pane_map.get(a.get("tmuxPane") or "")
+        if not key:
+            continue
+        status = a.get("status") or "idle"
+        if key not in best or RANK.get(status, 9) < RANK.get(best[key][1], 9):
+            best[key] = (a, status)
+
+    def branch_of(entry):
+        if not entry:
+            return ""
+        b = entry[0].get("gitBranch") or ""
+        return "" if b in ("HEAD", "None") else b
+
+    ctxw = max(20, width - IDXW - STATEW - SESSW - WINW - 16)
+
+    rows = []
+    counter = 0
+    for name in names:
+        wins = sorted(
+            [(idx, per_window[(s, idx)]) for (s, idx) in per_window if s == name],
+            key=lambda r: int(r[0]) if r[0].isdigit() else 0)
+        if not wins:
+            continue
+
+        # Session identity, taken from its first window: shown once on the header
+        # instead of repeated down every row.
+        head_idx, (_, head_cwd) = wins[0]
+        head_loc = short_path(head_cwd)
+        head_branch = branch_of(best.get((name, head_idx)))
+
+        loc_txt = "%s%s/%s%s%s" % (OVERLAY, head_loc[0], RESET, TEXT, head_loc[1]) \
+            if head_loc[0] else "%s%s" % (TEXT, head_loc[1])
+        if head_branch:
+            loc_txt += "%s:%s%s" % (OVERLAY, BLUE, clip_tail(head_branch, 52))
+
+        if rows:  # spacer between groups only; never before the first
+            rows.append("\t")
+        rows.append("%s:%s\t%s▼ %s%s %s(%d)%s   %s%s" % (
+            name, head_idx,
+            MAUVE, TEXT, name, OVERLAY, len(wins), RESET, loc_txt, RESET))
+
+        for idx, (wname, cwd) in wins:
+            counter += 1
+            entry = best.get((name, idx))
+
+            if entry:
+                a, status = entry
+                colour, label = STYLE.get(status, (SURFACE, status))
+                if status == "waiting" and a.get("attentionType"):
+                    label = a["attentionType"]
+                context = (a.get("lastPrompt") or "").replace("\n", " ").strip()
+                when = age(a.get("lastActivityAt") or "", now)
+                dot = "%s●%s" % (colour, RESET)
+            else:
+                colour, label = SURFACE, "-"
+                when, context = "", ""
+                dot = "%s○%s" % (SURFACE, RESET)
+
+            state = "%s%s%s%s" % (colour, label, RESET, " " * max(0, STATEW - len(label)))
+            shown_sess = clip(name, SESSW - 1)
+            sess_col = "%s%s%s%s" % (
+                OVERLAY, shown_sess, RESET, " " * max(0, SESSW - len(shown_sess)))
+            shown_win = clip(wname, WINW)
+            win_col = "%s%s%s%s" % (
+                TEXT, shown_win, RESET, " " * max(0, WINW - len(shown_win)))
+
+            # Only a worktree (different path or branch from its session) earns the space.
+            here_loc, here_branch = short_path(cwd), branch_of(entry)
+            odd = ""
+            if here_loc != head_loc or here_branch != head_branch:
+                bit = here_loc[1] + ((":" + clip_tail(here_branch, 28)) if here_branch else "")
+                odd = "%s%s%s " % (BLUE, clip(bit, 34), RESET)
+
+            tail = "%s%s%s" % (OVERLAY, clip(context, ctxw), RESET) if context else ""
+            rows.append("%s:%s\t %s%s%s %s %s %s%s %s%s%s  %s%s" % (
+                name, idx,
+                OVERLAY, str(counter).rjust(IDXW), RESET,
+                dot, state, sess_col, win_col,
+                SURFACE, when.rjust(4), RESET,
+                odd, tail))
+    return rows
+
+
+FZF_COLORS = ("bg+:#313244,fg+:#cdd6f4,hl:#f38ba8,hl+:#f38ba8,pointer:#f38ba8,"
+              "prompt:#89b4fa,info:#6c7086,border:#313244,gutter:-1,query:#cdd6f4")
+
+
+def main():
+    current = current_session()
+    names = sessions_by_recency(current)
+    if not names:
+        tmux("display-message", "no other sessions")
+        return 0
+
+    width = shutil.get_terminal_size((160, 40)).columns
+    per_window, pane_map = windows()
+    rows = build_rows(names, per_window, pane_map, ccmux_agents(), time.time(), width)
+    if not rows:
+        tmux("display-message", "no other windows")
+        return 0
+
+    try:
+        r = subprocess.run(
+            ["fzf", "--ansi", "--reverse",
+             "--with-nth", "2..", "--delimiter", "\t",
+             "--highlight-line", "--no-separator", "--no-scrollbar",
+             "--info", "inline-right", "--padding", "0,1",
+             "--pointer", "▌", "--prompt", "  ",
+             "--color", FZF_COLORS],
+            input="\n".join(rows), capture_output=True, text=True)
+    except FileNotFoundError:
+        tmux("display-message", "tmux-session-picker: fzf not found")
+        return 1
+
+    if r.returncode != 0 or not r.stdout.strip():
+        return 0
+
+    selected = r.stdout.split("\t")[0].strip()
+    if not selected:  # a blank spacer row
+        return 0
+
+    session, _, window = selected.partition(":")
+    # switch-client first, then select-window: a single "sess:idx" target to
+    # switch-client moves the client but leaves the session on its old window.
+    tmux("switch-client", "-t", session)
+    if window:
+        tmux("select-window", "-t", selected)
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())
