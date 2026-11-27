@@ -35,6 +35,16 @@ SIDEBAR_TITLE = "ccmux-sidebar"
 # Flags that pick a conversation; dropped before `--resume <id>` is added.
 PICK_WITH_VALUE = {"--resume", "-r", "--session-id"}
 PICK_ALONE = {"--continue", "-c"}
+# Flags that take one value. The first other word that doesn't start with "-"
+# is the start prompt (`claude --name x 'Read BRIEF.md and follow it.'`). It is
+# dropped with everything after it, so a restore doesn't send the prompt again.
+WITH_VALUE = PICK_WITH_VALUE | {
+    "--model", "--permission-mode", "--name", "-n", "--effort", "--agent",
+    "--allowed-tools", "--allowedTools", "--disallowed-tools", "--disallowedTools",
+    "--mcp-config", "--add-dir", "--settings", "--setting-sources", "--plugin-dir",
+    "--append-system-prompt", "--system-prompt", "--fallback-model", "--betas",
+    "--debug-file", "--remote-control-session-name-prefix",
+}
 
 
 def alive(pid):
@@ -98,17 +108,23 @@ def resume_command(saved, claude_pid, sid):
         words = base.split()
     if not words or "claude" not in os.path.basename(words[0]):
         words = ["claude"]
-    keep, skip = [words[0]], False
-    for w in words[1:]:
-        if skip:
-            skip = False
-        elif w in PICK_WITH_VALUE:
-            skip = True
-        elif w in PICK_ALONE or w.startswith("--resume="):
-            pass
+    # Each option as a tuple: (flag,) or (flag, value). Repeats are dropped.
+    opts, rest = [], words[1:]
+    i = 0
+    while i < len(rest):
+        w = rest[i]
+        if not w.startswith("-"):
+            break  # the start prompt
+        if w in WITH_VALUE and i + 1 < len(rest):
+            opt, i = (w, rest[i + 1]), i + 2
         else:
-            keep.append(w)
-    return " ".join([keep[0], "--resume", sid] + [shlex.quote(w) for w in keep[1:]])
+            opt, i = (w,), i + 1
+        if w in PICK_WITH_VALUE or w in PICK_ALONE or w.startswith("--resume="):
+            continue
+        if opt not in opts:
+            opts.append(opt)
+    flat = [shlex.quote(x) for opt in opts for x in opt]
+    return " ".join([words[0], "--resume", sid] + flat)
 
 
 def main():

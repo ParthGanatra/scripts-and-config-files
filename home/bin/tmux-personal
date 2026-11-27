@@ -1,0 +1,36 @@
+#!/usr/bin/env bash
+# Attach the personal tmux server (`tmux -L personal`), starting it first if needed.
+#
+# The work sessions stay on the default tmux server. The personal server loads the
+# same tmux.conf, whose `%if` block gives it its own resurrect saves
+# (~/.local/share/tmux/resurrect-personal) and its own ccmux daemon (state in
+# ~/.config/ccmux-personal, port 2270), because one ccmux daemon tracks one server.
+#
+# A new server restores the last personal save, as after a reboot: continuum
+# skips its automatic restore whenever another tmux server runs.
+#
+#   tmux-personal          attach (start and restore when not running)
+#   tmux-personal --no-attach
+set -uo pipefail
+export PATH="/opt/homebrew/bin:$HOME/.local/bin:/usr/bin:/bin:/usr/sbin:/sbin"
+export CCMUX_HOME="$HOME/.config/ccmux-personal" CCMUX_PORT=2270
+T=(tmux -L personal)
+
+if ! "${T[@]}" has-session 2>/dev/null; then
+  "${T[@]}" new-session -d -s 0 -c "$HOME"   # resurrect drops a session named 0 after a restore
+  if [ -e "$HOME/.local/share/tmux/resurrect-personal/last" ]; then
+    "${T[@]}" run-shell "$HOME/.config/tmux/plugins/tmux-resurrect/scripts/restore.sh"
+  fi
+fi
+
+if ! ccmux daemon status 2>/dev/null | grep -q "^Daemon: running"; then
+  ccmux daemon start -b --label personal >/dev/null
+fi
+
+[ "${1:-}" = "--no-attach" ] && exit 0
+if [ -n "${TMUX:-}" ]; then
+  # Nested, both servers would take the same prefix key.
+  echo "The personal server is running. Attach it from an iTerm window outside tmux: tmux-personal" >&2
+  exit 0
+fi
+exec "${T[@]}" attach
